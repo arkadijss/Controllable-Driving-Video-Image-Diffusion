@@ -20,24 +20,29 @@ args_dict = {
     "n_prompt": n_prompt,
     "num_samples": 1,
     "image_resolution": 512,
-    "detect_resolution": 512,
+    # "detect_resolution": 512,
     "ddim_steps": ddim_steps,
     "guess_mode": False,
     "strength": 1.0,
     "scale": 9.0,
     "seed": 42,
     "eta": 0.0,
+    # "low_threshold": 100,
+    # "high_threshold": 200,
 }
-print("Calling process with arguments:")
-for k, v in args_dict.items():
-    print(f"{k}: {v}")
 
 
-def process_sequence(condition):
+def process_sequence(condition, args_dict):
+    print(f"Starting to process {condition} sequence with arguments:")
+    for k, v in args_dict.items():
+        print(f"{k}: {v}")
+
     if condition == "seg":
         from gradio_seg2image import process
     elif condition == "depth":
         from gradio_depth2image import process
+    elif condition == "canny":
+        from gradio_canny2image import process
 
     input_dir = input_ds_dir / rel_dir
     output_dir = output_ds_dir / rel_dir / method / condition
@@ -75,5 +80,11 @@ def process_sequence(condition):
 
 
 if __name__ == "__main__":
-    process_sequence("seg")
-    process_sequence("depth")
+    args_dict_seg_depth = args_dict.copy()
+    args_dict_seg_depth["detect_resolution"] = 512
+    process_sequence("seg", args_dict_seg_depth)
+    process_sequence("depth", args_dict_seg_depth)
+    args_dict_canny = args_dict.copy()
+    args_dict_canny["low_threshold"] = 100
+    args_dict_canny["high_threshold"] = 200
+    process_sequence("canny", args_dict_canny)
