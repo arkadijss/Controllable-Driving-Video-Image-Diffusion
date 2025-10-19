@@ -23,10 +23,13 @@ model = model.cuda()
 ddim_sampler = DDIMSampler(model)
 
 
-def process(input_image, prompt, a_prompt, n_prompt, num_samples, image_resolution, detect_resolution, ddim_steps, guess_mode, strength, scale, seed, eta):
+def process(input_image, prompt, a_prompt, n_prompt, num_samples, image_resolution, detect_resolution, ddim_steps, guess_mode, strength, scale, seed, eta, use_pregenerated=False):
     with torch.no_grad():
         input_image = HWC3(input_image)
-        detected_map = apply_uniformer(resize_image(input_image, detect_resolution))
+        if use_pregenerated:
+            detected_map = resize_image(input_image, detect_resolution)
+        else:
+            detected_map = apply_uniformer(resize_image(input_image, detect_resolution))
         img = resize_image(input_image, image_resolution)
         H, W, C = img.shape
 

@@ -1,90 +1,128 @@
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
+from gradio_depth2image import process as process_depth
+from gradio_seg2image import process as process_seg
 
-method = "ControlNet"
-
-input_ds_dir = Path.home() / "data/KITTI_test"
-output_ds_dir = Path.home() / "data/KITTI_output"
-suffix = ".png"
-
-rel_dir = "data_tracking_image_2/testing/image_02/0018"
-prompt = "a driving scene in a town, photo-realistic, sunny weather"
-a_prompt = "best quality, photo-realistic, extremely detailed"
-n_prompt = "bad quality, cartoon style, unrealistic"
-ddim_steps = 40
-
-args_dict = {
-    "prompt": prompt,
-    "a_prompt": a_prompt,
-    "n_prompt": n_prompt,
-    "num_samples": 1,
-    "image_resolution": 512,
-    # "detect_resolution": 512,
-    "ddim_steps": ddim_steps,
-    "guess_mode": False,
-    "strength": 1.0,
-    "scale": 9.0,
-    "seed": 42,
-    "eta": 0.0,
-    # "low_threshold": 100,
-    # "high_threshold": 200,
+PROCESS_MAP = {
+    "segmentation": process_seg,
+    "depth": process_depth,
 }
 
 
-def process_sequence(condition, args_dict):
-    print(f"Starting to process {condition} sequence with arguments:")
-    for k, v in args_dict.items():
-        print(f"{k}: {v}")
+@dataclass
+class InferenceConfig:
+    method: str
+    condition: str
+    use_pregenerated: bool
+    prompt: str
+    a_prompt: str
+    n_prompt: str
+    num_samples: int
+    image_resolution: int
+    detect_resolution: int
+    ddim_steps: int
+    guess_mode: bool
+    strength: float
+    scale: float
+    seed: int
+    eta: float
+    input_ds_dir: Path
+    output_ds_dir: Path
+    suffix: str = ".png"
 
-    if condition == "seg":
-        from gradio_seg2image import process
-    elif condition == "depth":
-        from gradio_depth2image import process
-    elif condition == "canny":
-        from gradio_canny2image import process
 
-    input_dir = input_ds_dir / rel_dir
-    output_dir = output_ds_dir / rel_dir / method / condition
+def process_sequence(clip_dir: Path, config: InferenceConfig):
+    condition = config.condition
+    process_fn = PROCESS_MAP.get(condition)
+    if process_fn is None:
+        raise ValueError(f"Unsupported condition: {condition}")
+
+    print(f"Processing clip {clip_dir.name} with condition {condition}")
+    output_dir = config.output_ds_dir / config.method / clip_dir.name
     output_dir.mkdir(parents=True, exist_ok=True)
-    print("Input directory:", input_dir)
-    print("Output directory:", output_dir)
-    for input_img_path in input_dir.glob(f"*{suffix}"):
+
+    for input_img_path in sorted(clip_dir.glob(f"*{config.suffix}")):
         input_img = cv2.imread(str(input_img_path))
         input_img = cv2.cvtColor(input_img, cv2.COLOR_BGR2RGB)
-        args_dict_sample = args_dict.copy()
-        args_dict_sample["input_image"] = input_img
-        results = process(**args_dict_sample)
 
+        results = process_fn(
+            input_image=input_img,
+            prompt=config.prompt,
+            a_prompt=config.a_prompt,
+            n_prompt=config.n_prompt,
+            num_samples=config.num_samples,
+            image_resolution=config.image_resolution,
+            detect_resolution=config.detect_resolution,
+            ddim_steps=config.ddim_steps,
+            guess_mode=config.guess_mode,
+            strength=config.strength,
+            scale=config.scale,
+            seed=config.seed,
+            eta=config.eta,
+            use_pregenerated=config.use_pregenerated,
+        )
         detected_cond = results[0]
         generated_images = results[1:]
+        stem = input_img_path.stem
 
-        input_img_stem = input_img_path.stem
-        detected_cond_out_path = output_dir / f"{input_img_stem}_{condition}{suffix}"
         cv2.imwrite(
-            str(detected_cond_out_path), cv2.cvtColor(detected_cond, cv2.COLOR_RGB2BGR)
+            str(output_dir / f"{stem}_{condition}{config.suffix}"),
+            cv2.cvtColor(detected_cond, cv2.COLOR_RGB2BGR),
         )
-
-        for i, generated_img in enumerate(generated_images):
-            generated_img_out_path = (
-                output_dir / f"{input_img_stem}_{condition}_{i}{suffix}"
-            )
+        for i, img in enumerate(generated_images):
             cv2.imwrite(
-                str(generated_img_out_path),
-                cv2.cvtColor(generated_img, cv2.COLOR_RGB2BGR),
+                str(output_dir / f"{stem}_{condition}_{i}{config.suffix}"),
+                cv2.cvtColor(img, cv2.COLOR_RGB2BGR),
             )
 
-        print(f"Processed image {input_img_stem}")
 
-    print(f"Finished processing sequence {rel_dir} with condition {condition}")
+def process_dataset(config: InferenceConfig):
+    condition_dir = (
+        config.input_ds_dir / config.condition
+        if config.use_pregenerated
+        else config.input_ds_dir / "raw_input"
+    )
+    for clip_dir in condition_dir.iterdir():
+        if clip_dir.is_dir():
+            process_sequence(clip_dir, config)
 
 
 if __name__ == "__main__":
-    args_dict_seg_depth = args_dict.copy()
-    args_dict_seg_depth["detect_resolution"] = 512
-    process_sequence("seg", args_dict_seg_depth)
-    process_sequence("depth", args_dict_seg_depth)
-    args_dict_canny = args_dict.copy()
-    args_dict_canny["low_threshold"] = 100
-    args_dict_canny["high_threshold"] = 200
-    process_sequence("canny", args_dict_canny)
+    base_dir = Path.home() / "data"
+    input_ds_dir = base_dir / "KITTI-360_proc/clips_16_flat/val"
+    output_ds_dir = base_dir / "KITTI-360_output/val/ControlNet_v10"
+
+    prompt = "a driving scene in a town, photo-realistic, sunny weather"
+    a_prompt = "best quality, photo-realistic, extremely detailed"
+    n_prompt = "bad quality, cartoon style, unrealistic"
+
+    common_kwargs = dict(
+        prompt=prompt,
+        use_pregenerated=True,
+        a_prompt=a_prompt,
+        n_prompt=n_prompt,
+        num_samples=1,
+        image_resolution=512,
+        detect_resolution=512,
+        ddim_steps=40,
+        guess_mode=False,
+        strength=1.0,
+        scale=9.0,
+        seed=42,
+        eta=0.0,
+        input_ds_dir=input_ds_dir,
+        output_ds_dir=output_ds_dir,
+        suffix=".png",
+    )
+
+    seg_config = InferenceConfig(
+        method="ControlNet_v10_InternImage-H", condition="segmentation", **common_kwargs
+    )
+    depth_config = InferenceConfig(
+        method="ControlNet_v10_Depth_Anything_V2", condition="depth", **common_kwargs
+    )
+
+    process_dataset(seg_config)
+    process_dataset(depth_config)
