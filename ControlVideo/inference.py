@@ -3,6 +3,7 @@ import numpy as np
 import argparse
 import imageio
 import torch
+from PIL import Image
 
 from einops import rearrange
 from diffusers import DDIMScheduler, AutoencoderKL
@@ -24,8 +25,9 @@ inter_path = "checkpoints/flownet.pkl"
 controlnet_dict_version = {
     "v10":{
         "openpose": "checkpoints/sd-controlnet-openpose",
-        "depth_midas": "checkpoints/sd-controlnet-depth",
+        "depth": "checkpoints/sd-controlnet-depth",
         "canny": "checkpoints/sd-controlnet-canny",
+        "segmentation": "checkpoints/sd-controlnet-seg"
     },
     "v11": {
     "softedge_pidinet": "checkpoints/control_v11p_sd15_softedge",
@@ -37,6 +39,7 @@ controlnet_dict_version = {
     "lineart_anime": "checkpoints/control_v11p_sd15_lineart_anime",
     "lineart_coarse": "checkpoints/control_v11p_sd15_lineart",
     "lineart_realistic": "checkpoints/control_v11p_sd15_lineart",
+    "depth": "checkpoints/control_v11f1p_sd15_depth",
     "depth_midas": "checkpoints/control_v11f1p_sd15_depth",
     "depth_leres": "checkpoints/control_v11f1p_sd15_depth",
     "depth_leres++": "checkpoints/control_v11f1p_sd15_depth",
@@ -47,7 +50,8 @@ controlnet_dict_version = {
     "openpose_faceonly": "checkpoints/control_v11p_sd15_openpose",
     "openpose_full": "checkpoints/control_v11p_sd15_openpose",
     "openpose_hand": "checkpoints/control_v11p_sd15_openpose",
-    "normal_bae": "checkpoints/control_v11p_sd15_normalbae"
+    "normal_bae": "checkpoints/control_v11p_sd15_normalbae",
+    "segmentation": "checkpoints/control_v11p_sd15_seg"
     }
 }
 # load processor from processor_id
@@ -58,15 +62,14 @@ controlnet_dict_version = {
 #  "scribble_hed, "scribble_pidinet", "shuffle", "softedge_hed", "softedge_hedsafe",
 #  "softedge_pidinet", "softedge_pidsafe"]
 
-POS_PROMPT = "best quality, photo-realistic, extremely detailed"
+POS_PROMPT = "best quality, photorealistic, extremely detailed"
 NEG_PROMPT = "bad quality, cartoon style, unrealistic"
 
 
-
-def get_args():
+def get_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--prompt", type=str, required=True, help="Text description of target video")
-    parser.add_argument("--video_path", type=str, required=True, help="Path to a source video")
+    parser.add_argument("--prompt", type=str, default=None, help="Text description of target video")
+    parser.add_argument("--video_path", type=str, default=None, help="Path to a source video")
     parser.add_argument("--output_path", type=str, default="./outputs", help="Directory of output")
     parser.add_argument("--condition", type=str, default="depth", help="Condition of structure sequence")
     parser.add_argument("--video_length", type=int, default=15, help="Length of synthesized video")
@@ -78,19 +81,14 @@ def get_args():
     parser.add_argument("--version", type=str, default='v10', choices=["v10", "v11"], help="Version of ControlNet")
     parser.add_argument("--frame_rate", type=int, default=None, help="The frame rate of loading input video. Default rate is computed according to video length.")
     parser.add_argument("--temp_video_name", type=str, default=None, help="Default video name")
-    
-    args = parser.parse_args()
-    return args
+    parser.add_argument("--condition_dir", type=str, default=None, help="Directory of pre-generated condition frames")
+    parser.add_argument("--num_inference_steps", type=int, default=50, help="Number of inference steps")
+    parser.add_argument("--fps", type=int, default=4, help="FPS of output videos")
 
-if __name__ == "__main__":
-    args = get_args()
-    os.makedirs(args.output_path, exist_ok=True)
-    
-    # Height and width should be a multiple of 32
-    args.height = (args.height // 32) * 32    
-    args.width = (args.width // 32) * 32    
+    return parser
 
-    processor = Processor(args.condition)
+
+def load_model(args):
     controlnet_dict = controlnet_dict_version[args.version]
     
     tokenizer = CLIPTokenizer.from_pretrained(sd_path, subfolder="tokenizer")
@@ -112,42 +110,73 @@ if __name__ == "__main__":
     generator = torch.Generator(device="cuda")
     generator.manual_seed(args.seed)
 
+    processor = None
+    if args.use_processor:
+        processor = Processor(args.condition)
+
+    return pipe, generator, processor
+
+
+def process_video(args, pipe, generator, processor=None):
     # Step 1. Read a video
     video = read_video(video_path=args.video_path, video_length=args.video_length, width=args.width, height=args.height, frame_rate=args.frame_rate)
 
     # Save source video
     original_pixels = rearrange(video, "(b f) c h w -> b c f h w", b=1)
-    save_videos_grid(original_pixels, os.path.join(args.output_path, "source_video.mp4"), rescale=True)
+    save_videos_grid(original_pixels, os.path.join(args.output_path, "source_video.mp4"), rescale=True, fps=args.fps)
 
-
-    # Step 2. Parse a video to conditional frames
-    t2i_transform = torchvision.transforms.ToPILImage()
+    # Step 2
     pil_annotation = []
-    for frame in video:
-        pil_frame = t2i_transform(frame)
-        pil_annotation.append(processor(pil_frame, to_pil=True))
+    if args.condition_dir is not None:
+        # Use pregenerated conditional frames
+        condition_dir = args.condition_dir
+        frames = sorted([f for f in os.listdir(condition_dir)])
+        for frame in frames:
+            img = Image.open(os.path.join(condition_dir, frame)).convert("RGB")
+            img = img.resize((args.width, args.height), Image.BICUBIC)
+            pil_annotation.append(img)
+    else:
+        # Parse a video to conditional frames
+        t2i_transform = torchvision.transforms.ToPILImage()
+        for frame in video:
+            pil_frame = t2i_transform(frame)
+            pil_annotation.append(processor(pil_frame, to_pil=True))
+
+        # Reduce memory (optional)
+        del processor; torch.cuda.empty_cache()
 
     # Save condition video
     video_cond = [np.array(p).astype(np.uint8) for p in pil_annotation]
-    imageio.mimsave(os.path.join(args.output_path, f"{args.condition}_condition.mp4"), video_cond, fps=8)
-
-    # Reduce memory (optional)
-    del processor; torch.cuda.empty_cache()
+    imageio.mimsave(os.path.join(args.output_path, f"{args.condition}_condition.mp4"), video_cond, fps=args.fps)
 
     # Step 3. inference
 
     if args.is_long_video:
         window_size = int(np.sqrt(args.video_length))
         sample = pipe.generate_long_video(args.prompt + POS_PROMPT, video_length=args.video_length, frames=pil_annotation, 
-                    num_inference_steps=50, smooth_steps=args.smoother_steps, window_size=window_size,
+                    num_inference_steps=args.num_inference_steps, smooth_steps=args.smoother_steps, window_size=window_size,
                     generator=generator, guidance_scale=12.5, negative_prompt=NEG_PROMPT,
                     width=args.width, height=args.height
                 ).videos
     else:
         sample = pipe(args.prompt + POS_PROMPT, video_length=args.video_length, frames=pil_annotation, 
-                    num_inference_steps=50, smooth_steps=args.smoother_steps,
+                    num_inference_steps=args.num_inference_steps, smooth_steps=args.smoother_steps,
                     generator=generator, guidance_scale=12.5, negative_prompt=NEG_PROMPT,
                     width=args.width, height=args.height
                 ).videos
     args.temp_video_name = args.prompt if args.temp_video_name is None else args.temp_video_name
-    save_videos_grid(sample, f"{args.output_path}/{args.temp_video_name}.mp4")
+    save_videos_grid(sample, f"{args.output_path}/{args.temp_video_name}.mp4", fps=args.fps)
+
+
+if __name__ == "__main__":
+    parser = get_parser()
+    args = parser.parse_args()
+    os.makedirs(args.output_path, exist_ok=True)
+    
+    # Height and width should be a multiple of 32
+    args.height = (args.height // 32) * 32    
+    args.width = (args.width // 32) * 32
+
+    pipe_infer, generator_infer, processor_infer = load_model(args)
+
+    process_video(args, pipe_infer, generator_infer, processor_infer)
