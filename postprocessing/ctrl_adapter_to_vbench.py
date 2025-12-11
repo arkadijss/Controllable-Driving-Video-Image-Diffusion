@@ -1,37 +1,47 @@
+import shutil
 from pathlib import Path
 
-import cv2
+import utils
+import yaml
 
 
-def frames_to_video(frames_dir, output_video_path, fps):
-    frames = sorted(frames_dir.glob("*.png"))
+def ctrl_adapter_to_vbench(input_dir, output_dir, fps):
+    output_dir.mkdir(exist_ok=True)
 
-    first_frame = cv2.imread(str(frames[0]))
-    height, width, _ = first_frame.shape
+    for submethod_dir in sorted(input_dir.iterdir()):
+        submethod_output_dir = output_dir / submethod_dir.name
+        submethod_output_dir.mkdir(exist_ok=True)
 
-    output_video_path.parent.mkdir(parents=True, exist_ok=True)
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(str(output_video_path), fourcc, fps, (width, height))
+        video_output_dir = submethod_output_dir / "output_videos"
+        frame_output_dir = submethod_output_dir / "output_frames"
+        video_output_dir.mkdir(exist_ok=True)
+        frame_output_dir.mkdir(exist_ok=True)
 
-    for frame_path in frames:
-        frame = cv2.imread(str(frame_path))
-        writer.write(frame)
+        conditions = [
+            condition_dir.name.split("_")[1]
+            for condition_dir in submethod_dir.iterdir()
+            if "condition" in condition_dir.name
+        ]
+        conditions = list(set(conditions))
+        vbench_config = {"conditions": conditions}
+        config_output_path = submethod_output_dir / "vbench_config.yaml"
+        with open(config_output_path, "w") as file:
+            yaml.dump(vbench_config, file)
 
-    writer.release()
-
-
-def ctrl_adapter_to_vbench(input_root, output_root, fps):
-    for method_dir in sorted(input_root.iterdir()):
-        frames_root = method_dir / "output_frames"
-
-        output_method_dir = output_root / method_dir.name
+        frames_root = submethod_dir / "output_frames"
         for clip_dir in sorted(frames_root.iterdir()):
-            output_video_path = output_method_dir / f"{clip_dir.name}.mp4"
-            frames_to_video(clip_dir, output_video_path, fps=fps)
-            print(f"Saved {output_video_path}")
+            video_output_path = video_output_dir / f"{clip_dir.name}.mp4"
+            frame_paths = sorted(clip_dir.glob("*.png"))
+            utils.frames_to_video(frame_paths, video_output_path, fps=fps)
+            print(f"Saved video: {video_output_path}")
+
+            clip_frame_output_dir = frame_output_dir / f"{clip_dir.name}"
+            shutil.copytree(clip_dir, clip_frame_output_dir, dirs_exist_ok=True)
+            print(f"Saved frames: {clip_frame_output_dir}")
 
 
 if __name__ == "__main__":
-    input_root = Path("~/data/KITTI-360_output/val/Ctrl-Adapter").expanduser()
-    output_root = Path("~/data/KITTI-360_output/VBench/Ctrl-Adapter").expanduser()
-    ctrl_adapter_to_vbench(input_root, output_root, fps=4)
+    input_dir = Path("~/data/KITTI-360_output/val/Ctrl-Adapter").expanduser()
+    output_dir = Path("~/data/KITTI-360_output/VBench/Ctrl-Adapter").expanduser()
+    fps = 4
+    ctrl_adapter_to_vbench(input_dir, output_dir, fps=fps)

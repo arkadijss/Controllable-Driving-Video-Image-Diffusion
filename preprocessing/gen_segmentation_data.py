@@ -10,6 +10,7 @@ from InternImage.segmentation.image_demo import test_single_image
 from mmcv.runner import load_checkpoint
 from mmseg.apis import inference_segmentor, init_segmentor
 from mmseg.core import get_classes
+from mmseg.core.evaluation import get_palette
 from PIL import Image
 
 
@@ -20,7 +21,7 @@ class InternImageArgs:
     checkpoint: str = None
     out: str = None
     device: str = "cuda:0"
-    palette: Union[str, np.ndarray] = "ade20k"
+    palette: str = "ade20k"
     opacity: Optional[float] = 1.0
 
 
@@ -35,15 +36,21 @@ def load_internimage_h(args: InternImageArgs):
     return model
 
 
-def run_internimage_h(args: InternImageArgs, model: nn.Module, test_func):
+def run_internimage_h(
+    args: InternImageArgs, model: nn.Module, color_palette, test_func
+):
     # check arg.img is directory of a single image.
     if os.path.isdir(args.img):
         for img in sorted(os.listdir(args.img)):
             test_func(
-                model, os.path.join(args.img, img), args.out, ada_palette, args.opacity
+                model,
+                os.path.join(args.img, img),
+                args.out,
+                color_palette,
+                args.opacity,
             )
     else:
-        test_func(model, args.img, args.out, ada_palette, args.opacity)
+        test_func(model, args.img, args.out, color_palette, args.opacity)
 
 
 def test_single_image_ctrl(model, img_name, out_dir, color_palette, opacity):
@@ -73,23 +80,19 @@ def test_single_image_ctrl(model, img_name, out_dir, color_palette, opacity):
 def gen_segmentation_data(input_dir: Path, output_dir: Path, method: str):
     cameras = ["image_00"]
 
+    args = InternImageArgs(
+        config="InternImage/segmentation/configs/ade20k/mask2former_internimage_h_896_80k_cocostuff2ade20k_ss.py",
+        checkpoint="InternImage/segmentation/checkpoint_dir/seg/mask2former_internimage_h_896_80k_cocostuff2ade20k.pth",
+        device="cuda:0",
+        palette="ade20k",
+        opacity=1.0,
+    )
+    model = load_internimage_h(args)
+
     if method == "segmentation":
-        args = InternImageArgs(
-            config="InternImage/segmentation/configs/ade20k/mask2former_internimage_h_896_80k_cocostuff2ade20k_ss.py",
-            checkpoint="InternImage/segmentation/checkpoint_dir/seg/mask2former_internimage_h_896_80k_cocostuff2ade20k.pth",
-            device="cuda:0",
-            palette="ade20k",
-            opacity=1.0,
-        )
-        model = load_internimage_h(args)
+        color_palette = get_palette(args.palette)
     elif method == "segmentation_ctrl":
-        args = InternImageArgs(
-            config="InternImage/segmentation/configs/ade20k/mask2former_internimage_h_896_80k_cocostuff2ade20k_ss.py",
-            checkpoint="InternImage/segmentation/checkpoint_dir/seg/mask2former_internimage_h_896_80k_cocostuff2ade20k.pth",
-            device="cuda:0",
-            palette=ada_palette,
-            opacity=None,
-        )
+        color_palette = ada_palette
 
     for sequence_dir in input_dir.iterdir():
         for cam in cameras:
@@ -98,11 +101,11 @@ def gen_segmentation_data(input_dir: Path, output_dir: Path, method: str):
             if method == "segmentation":
                 args.img = str(cam_dir)
                 args.out = str(output_dir / sequence_dir.name / cam)
-                run_internimage_h(args, model, test_single_image)
+                run_internimage_h(args, model, color_palette, test_single_image)
             elif method == "segmentation_ctrl":
                 args.img = str(cam_dir)
                 args.out = str(output_dir / sequence_dir.name / cam)
-                run_internimage_h(args, model, test_single_image_ctrl)
+                run_internimage_h(args, model, color_palette, test_single_image_ctrl)
 
 
 if __name__ == "__main__":

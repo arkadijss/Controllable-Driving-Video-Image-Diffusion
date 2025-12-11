@@ -29,8 +29,8 @@ class InferenceConfig:
     scale: float
     seed: int
     eta: float
-    input_ds_dir: Path
-    output_ds_dir: Path
+    input_ds_dir: str
+    output_ds_dir: str
     suffix: str = ".png"
     det: str = "None"
 
@@ -89,10 +89,11 @@ def process_sequence(clip_dir: Path, config: InferenceConfig):
 
 
 def process_dataset(config: InferenceConfig):
+    input_ds_dir = Path(config.input_ds_dir)
     condition_dir = (
-        config.input_ds_dir / config.condition
+        input_ds_dir / config.condition
         if config.det == "None"
-        else config.input_ds_dir / "raw_input"
+        else input_ds_dir / "raw_input"
     )
     for clip_dir in condition_dir.iterdir():
         if clip_dir.is_dir():
@@ -130,8 +131,8 @@ if __name__ == "__main__":
     parser.add_argument("--scale", type=float, default=9.0)
     parser.add_argument("--seed", type=int, default=12345)
     parser.add_argument("--eta", type=float, default=1.0)
-    parser.add_argument("--input_ds_dir", type=Path, required=True)
-    parser.add_argument("--output_ds_dir", type=Path, required=True)
+    parser.add_argument("--input_ds_dir", type=str, required=True)
+    parser.add_argument("--output_ds_dir", type=str, required=True)
     parser.add_argument("--suffix", type=str, default=".png")
     parser.add_argument("--det", type=str, default="None")
 

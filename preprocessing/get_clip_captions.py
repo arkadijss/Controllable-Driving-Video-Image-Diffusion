@@ -24,6 +24,6 @@ if __name__ == "__main__":
     split_dir = data_dir / "val"
     num_frames_per_clip = 16
     clip_split_dir = data_dir / f"clips_{num_frames_per_clip}_flat" / "val"
-    prompt = "a driving scene in a town, photo-realistic, sunny weather"
+    prompt = "a driving scene in a town, photorealistic, sunny weather"
 
     get_clip_captions(clip_split_dir, prompt)

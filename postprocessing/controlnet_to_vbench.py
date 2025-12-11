@@ -1,40 +1,59 @@
+import shutil
 from pathlib import Path
 
-import cv2
+import utils
+import yaml
 
 
-def controlnet_to_vbench(root_dir, output_dir, fps):
-    for method_dir in sorted(root_dir.iterdir()):
-        method_output_dir = output_dir / method_dir.name
-        method_output_dir.mkdir(parents=True, exist_ok=True)
+def controlnet_to_vbench(input_dir, output_dir, fps):
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-        for clip_dir in sorted(method_dir.iterdir()):
-            frames = sorted(
+    for submethod_dir in sorted(input_dir.iterdir()):
+        submethod_output_dir = output_dir / submethod_dir.name
+        submethod_output_dir.mkdir(parents=True, exist_ok=True)
+
+        video_output_dir = submethod_output_dir / "output_videos"
+        frame_output_dir = submethod_output_dir / "output_frames"
+        video_output_dir.mkdir(exist_ok=True)
+        frame_output_dir.mkdir(exist_ok=True)
+
+        config_path = submethod_dir / "config.yaml"
+        with open(config_path, "r") as file:
+            config = yaml.safe_load(file)
+
+        condition = config["condition"] if config["det"] == "None" else config["det"]
+        vbench_config = {"conditions": [condition]}
+        config_output_path = submethod_output_dir / "vbench_config.yaml"
+        with open(config_output_path, "w") as file:
+            yaml.dump(vbench_config, file)
+
+        for clip_dir in sorted(submethod_dir.iterdir()):
+            if not clip_dir.is_dir():
+                continue
+
+            frame_paths = sorted(
                 [
-                    f
-                    for f in clip_dir.iterdir()
-                    if f.is_file() and f.name.endswith("_0.png")
+                    frame_path
+                    for frame_path in clip_dir.iterdir()
+                    if frame_path.name.endswith("_0.png")
                 ]
             )
 
-            first_frame = cv2.imread(str(frames[0]))
-            height, width, _ = first_frame.shape
+            video_output_path = video_output_dir / f"{clip_dir.name}.mp4"
+            utils.frames_to_video(frame_paths, video_output_path, fps)
+            print(f"Saved video: {video_output_path}")
 
-            output_path = method_output_dir / f"{clip_dir.name}.mp4"
-            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            writer = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
-
-            for frame in frames:
-                img = cv2.imread(str(frame))
-                writer.write(img)
-
-            writer.release()
-            print(f"Saved video: {output_path}")
+            clip_frame_output_dir = frame_output_dir / f"{clip_dir.name}"
+            clip_frame_output_dir.mkdir(exist_ok=True)
+            for frame_path in frame_paths:
+                frame_id = frame_path.name.split("_")[0]
+                dst_path = clip_frame_output_dir / f"{frame_id}{frame_path.suffix}"
+                shutil.copy(frame_path, dst_path)
+            print(f"Saved frames: {clip_frame_output_dir}")
 
 
 if __name__ == "__main__":
-    root_dir = Path("~/data/KITTI-360_output/val/ControlNet_v11").expanduser()
+    input_dir = Path("~/data/KITTI-360_output/val/ControlNet_v11").expanduser()
     output_dir = Path("~/data/KITTI-360_output/VBench/ControlNet_v11").expanduser()
     fps = 4
-    output_dir.mkdir(parents=True, exist_ok=True)
-    controlnet_to_vbench(root_dir, output_dir, fps)
+    controlnet_to_vbench(input_dir, output_dir, fps)
