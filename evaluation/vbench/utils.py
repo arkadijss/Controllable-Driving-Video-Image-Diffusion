@@ -351,7 +351,7 @@ def init_submodules(dimension_list, local=False, read_frame=False):
             if not os.path.exists(submodules_dict[dimension]['pretrained']):
                 wget_command = ['wget', 'https://huggingface.co/spaces/xinyu1205/recognize-anything/resolve/main/tag2text_swin_14m.pth', '-P', os.path.dirname(submodules_dict[dimension]["pretrained"])]
                 subprocess.run(wget_command, check=True)
-        elif dimension == 'appearance_style':
+        elif dimension in ["framewise_consistency", "appearance_style"]:
             if local:
                 submodules_dict[dimension] = {"name": f'{CACHE_DIR}/clip_model/ViT-B-32.pt'}
                 if not os.path.isfile(submodules_dict[dimension]["name"]):
@@ -366,6 +366,8 @@ def init_submodules(dimension_list, local=False, read_frame=False):
             if not os.path.exists(submodules_dict[dimension]['pretrain']):
                 wget_command = ['wget', 'https://huggingface.co/OpenGVLab/VBench_Used_Models/resolve/main/ViClip-InternVid-10M-FLT.pth', '-P', os.path.dirname(submodules_dict[dimension]["pretrain"])]
                 subprocess.run(wget_command, check=True)
+        elif dimension in ["depth_alignment", "segmentation_alignment"]:
+            submodules_dict[dimension] = []
 
         if get_rank() == 0:
             barrier()

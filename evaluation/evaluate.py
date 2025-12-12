@@ -99,6 +99,26 @@ def parse_args():
         4. 'None': no preprocessing
         """,
     )
+    # Depth alignment
+    parser.add_argument(
+        "--gt_depth_maps_dir",
+        type=str,
+        required=False,
+        default=None
+    )
+    # Segmentation alignment
+    parser.add_argument(
+        "--gt_segmentation_maps_dir",
+        type=str,
+        required=False,
+        default=None
+    )
+    parser.add_argument(
+        "--min_gt_ratio",
+        type=float,
+        required=False,
+        default=0.03
+    )
     args = parser.parse_args()
     return args
 
@@ -135,6 +155,11 @@ def main():
         kwargs['category'] = args.category
 
     kwargs['imaging_quality_preprocessing_mode'] = args.imaging_quality_preprocessing_mode
+    if args.gt_depth_maps_dir is not None:
+        kwargs["gt_depth_maps_dir"] = args.gt_depth_maps_dir
+    if args.gt_segmentation_maps_dir is not None:
+        kwargs["gt_segmentation_maps_dir"] = args.gt_segmentation_maps_dir
+    kwargs["min_gt_ratio"] = args.min_gt_ratio        
 
     my_VBench.evaluate(
         videos_path = args.videos_path,
