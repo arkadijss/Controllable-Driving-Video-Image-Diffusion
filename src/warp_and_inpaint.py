@@ -126,6 +126,7 @@ def main():
     prompt = "A driving scene in a town, photorealistic, clear daylight, blue sky, highly detailed"
     negative_prompt = "Bad quality, worst quality, cartoon style, unrealistic, blurry"
     experiment_name = f"{frame_ids[0]:05d}_to_{frame_ids[-1]:05d}"
+    fps = 4
 
     output_dir = Path(f"outputs") / "warp_and_inpaint_vkitti_2" / experiment_name
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -164,12 +165,12 @@ def main():
 
         gen_pipeline = generate_sd15.init_generation_pipeline()
         depth_image = generate_sd15.preprocess_depth_image(norm_depth_image)
-        src_frame = generate_sd15.generate_image(
+        src_frame_gen = generate_sd15.generate_image(
             gen_pipeline, prompt, negative_prompt, depth_image
         )
-        src_frame = cv2.cvtColor(np.array(src_frame), cv2.COLOR_RGB2BGR)
+        src_frame_out = cv2.cvtColor(np.array(src_frame_gen), cv2.COLOR_RGB2BGR)
         src_frame = cv2.resize(
-            src_frame, (orig_h, orig_h), interpolation=cv2.INTER_LINEAR
+            src_frame_out, (orig_h, orig_h), interpolation=cv2.INTER_LINEAR
         )
     else:
         src_frame_path = rgb_dir / f"rgb_{src_frame_id:05d}.jpg"
@@ -177,9 +178,23 @@ def main():
         src_frame = slice_image_horizontally(
             src_frame, principal_point_offset_x, orig_h
         )
+        src_frame_out = cv2.resize(
+            src_frame, diffusion_img_shape, interpolation=cv2.INTER_LINEAR
+        )
 
     src_frame_out_path = output_dir / f"{src_frame_id:05d}.png"
-    cv2.imwrite(str(src_frame_out_path), src_frame)
+    cv2.imwrite(str(src_frame_out_path), src_frame_out)
+
+    # Save output video
+    output_video_path = output_dir / f"{experiment_name}.mp4"
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    video_writer = cv2.VideoWriter(
+        str(output_video_path),
+        fourcc,
+        fps,
+        diffusion_img_shape,
+    )
+    video_writer.write(src_frame_out)
 
     inpaint_pipeline = generate_sd15.init_inpainting_pipeline()
 
@@ -306,17 +321,18 @@ def main():
 
         interpolated_frame_out_dir = output_pair_path / "interpolated_frames"
         interpolated_frame_out_dir.mkdir(parents=True, exist_ok=True)
-        for i, interp_frame in zip(
-            range(src_frame_id + 1, tgt_frame_id), interpolated_frames
-        ):
-            interp_frame_out_path = (
-                interpolated_frame_out_dir / f"interp_{i:02d}_{tgt_frame_id:05d}.png"
-            )
+        for id, interp_frame in zip(interp_ids, interpolated_frames):
+            interp_frame_out_path = interpolated_frame_out_dir / f"interp_{id:05d}.png"
             cv2.imwrite(str(interp_frame_out_path), interp_frame)
+            video_writer.write(interp_frame)
+
+        video_writer.write(src_frame_inpainted_diffusion)
 
         src_frame = src_frame_inpainted_diffusion_resized
         src_frame_id = tgt_frame_id
         depth_src = depth_tgt
+
+    video_writer.release()
 
 
 if __name__ == "__main__":
