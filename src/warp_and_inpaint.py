@@ -134,6 +134,7 @@ def main():
     orig_shape = (1242, 375)  # w, h
     opening_kernel_size = 3
     classical_inpaint_kernel_size = 3
+    mask_closing_kernel_size = 7
     prefill_missing_regions = False
     prefill_kernel_size = 7
     interp_inpaint_kernel_size = 3
@@ -254,16 +255,26 @@ def main():
             inpaint_kernel_size=classical_inpaint_kernel_size,
         )
 
+        if mask_closing_kernel_size > 0:
+            closing_kernel = np.ones(
+                (mask_closing_kernel_size, mask_closing_kernel_size), np.uint8
+            )
+            diffusion_inpainting_mask = cv2.morphologyEx(
+                opening, cv2.MORPH_CLOSE, closing_kernel
+            )
+        else:
+            diffusion_inpainting_mask = opening
+
         if prefill_missing_regions:
             src_frame_inpainted_classical = cv2.inpaint(
                 src_frame_inpainted_classical,
-                opening,
+                diffusion_inpainting_mask,
                 prefill_kernel_size,
                 cv2.INPAINT_TELEA,
             )
 
         input_image = Image.fromarray(src_frame_inpainted_classical)
-        mask_image = Image.fromarray(opening)
+        mask_image = Image.fromarray(diffusion_inpainting_mask)
 
         src_frame_inpainted_diffusion = generate_sd15.inpaint_image(
             inpaint_pipeline,
@@ -325,7 +336,7 @@ def main():
         mask_image_out_path = (
             output_pair_path / f"diffusion_inpainting_mask_{tgt_frame_id:05d}.png"
         )
-        cv2.imwrite(str(mask_image_out_path), opening)
+        cv2.imwrite(str(mask_image_out_path), diffusion_inpainting_mask)
 
         inpainted_diffusion_frame_out_path = (
             output_pair_path / f"inpainted_diffusion_{tgt_frame_id:05d}.png"
