@@ -9,8 +9,6 @@ from diffusers import (
 )
 from PIL import Image
 
-generator = torch.Generator(device="cuda").manual_seed(0)
-
 
 def init_generation_pipeline(use_segmentation=True):
     depth_controlnet = ControlNetModel.from_pretrained(
@@ -93,7 +91,8 @@ def preprocess_depth_image(depth_image):
     return depth_image
 
 
-def generate_image(pipeline, prompt, negative_prompt, control_image):
+def generate_image(pipeline, prompt, negative_prompt, control_image, seed=0):
+    generator = torch.Generator(device="cuda").manual_seed(seed)
     image = pipeline(
         prompt,
         negative_prompt=negative_prompt,
@@ -105,7 +104,10 @@ def generate_image(pipeline, prompt, negative_prompt, control_image):
     return image
 
 
-def inpaint_image(pipeline, prompt, negative_prompt, init_image, mask_image, **kwargs):
+def inpaint_image(
+    pipeline, prompt, negative_prompt, init_image, mask_image, seed=0, **kwargs
+):
+    generator = torch.Generator(device="cuda").manual_seed(seed)
     image = pipeline(
         prompt=prompt,
         negative_prompt=negative_prompt,
