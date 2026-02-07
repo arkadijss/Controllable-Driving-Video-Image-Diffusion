@@ -91,14 +91,14 @@ def preprocess_depth_image(depth_image):
     return depth_image
 
 
-def generate_image(pipeline, prompt, negative_prompt, control_image, seed=0):
+def generate_image(pipeline, prompt, negative_prompt, control_image, seed=0, **kwargs):
     generator = torch.Generator(device="cuda").manual_seed(seed)
     image = pipeline(
         prompt,
         negative_prompt=negative_prompt,
         image=control_image,
-        num_inference_steps=30,
         generator=generator,
+        **kwargs,
     ).images[0]
 
     return image

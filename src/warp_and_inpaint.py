@@ -137,7 +137,10 @@ def main():
     depth_thr = 0.3
     generate_first_frame = True
     max_gen_depth = 80.0
+    gen_num_inference_steps = 50
+    gen_depth_cond_scale = 1.0
     use_segmentation_for_generation = True
+    gen_segmentation_cond_scale = 1.0
     diffusion_img_shape = (512, 512)  # w, h
     orig_shape = (1242, 375)  # w, h
     opening_kernel_size = 3
@@ -147,6 +150,9 @@ def main():
     prefill_kernel_size = 7
     use_depth_for_inpainting = True
     use_segmentation_for_inpainting = True
+    inpaint_num_inference_steps = 50
+    inpaint_depth_cond_scale = 0.5
+    inpaint_segmentation_cond_scale = 0.5
     interp_inpaint_kernel_size = 3
     prompt = "A driving scene in a town, photorealistic, clear daylight, blue sky, highly detailed"
     negative_prompt = "Bad quality, worst quality, cartoon style, unrealistic, blurry"
@@ -221,16 +227,28 @@ def main():
 
         depth_image = generate_sd15.preprocess_depth_image(norm_depth_image)
 
-        control_image = [depth_image]
+        gen_kwargs = {
+            "num_inference_steps": gen_num_inference_steps,
+        }
+        gen_control_image = [depth_image]
+        gen_cond_scale = [gen_depth_cond_scale]
 
         if use_segmentation_for_generation:
-            control_image.append(seg_image)
+            gen_control_image.append(seg_image)
+            gen_cond_scale.append(gen_segmentation_cond_scale)
 
-        if len(control_image) == 1:
-            control_image = control_image[0]
+        if len(gen_control_image) == 1:
+            gen_control_image = gen_control_image[0]
+            gen_cond_scale = gen_cond_scale[0]
+
+        gen_kwargs["controlnet_conditioning_scale"] = gen_cond_scale
 
         src_frame_gen = generate_sd15.generate_image(
-            gen_pipeline, prompt, negative_prompt, control_image
+            gen_pipeline,
+            prompt,
+            negative_prompt,
+            gen_control_image,
+            **gen_kwargs,
         )
         src_frame = cv2.cvtColor(np.array(src_frame_gen), cv2.COLOR_RGB2BGR)
     else:
@@ -323,8 +341,9 @@ def main():
         input_image = Image.fromarray(src_frame_inpainted_classical)
         mask_image = Image.fromarray(diffusion_inpainting_mask)
 
-        kwargs = {}
-        control_image = []
+        inpaint_kwargs = {"num_inference_steps": inpaint_num_inference_steps}
+        inpaint_control_image = []
+        inpaint_cond_scale = []
         if use_depth_for_inpainting:
             depth_inpaint = get_depth(depth_dir, tgt_frame_id)
             depth_inpaint_clipped = np.clip(depth_inpaint, 0, max_gen_depth)
@@ -341,7 +360,8 @@ def main():
             depth_inpaint_image = generate_sd15.preprocess_depth_image(
                 depth_inpaint_normalized
             )
-            control_image.append(depth_inpaint_image)
+            inpaint_control_image.append(depth_inpaint_image)
+            inpaint_cond_scale.append(inpaint_depth_cond_scale)
 
         if use_segmentation_for_inpainting:
             seg_inpaint = get_segmentation_map(seg_dir, tgt_frame_id)
@@ -353,12 +373,15 @@ def main():
                 interpolation=cv2.INTER_NEAREST,
             )
             seg_inpaint_image = Image.fromarray(seg_inpaint_resized)
-            control_image.append(seg_inpaint_image)
+            inpaint_control_image.append(seg_inpaint_image)
+            inpaint_cond_scale.append(inpaint_segmentation_cond_scale)
 
-        if len(control_image) == 1:
-            kwargs["control_image"] = control_image[0]
-        elif len(control_image) > 1:
-            kwargs["control_image"] = control_image
+        if len(inpaint_control_image) == 1:
+            inpaint_control_image = inpaint_control_image[0]
+            inpaint_cond_scale = inpaint_cond_scale[0]
+
+        inpaint_kwargs["control_image"] = inpaint_control_image
+        inpaint_kwargs["controlnet_conditioning_scale"] = inpaint_cond_scale
 
         src_frame_inpainted_diffusion = generate_sd15.inpaint_image(
             inpaint_pipeline,
@@ -366,7 +389,7 @@ def main():
             negative_prompt,
             input_image,
             mask_image,
-            **kwargs,
+            **inpaint_kwargs,
         )
         src_frame_inpainted_diffusion = np.array(src_frame_inpainted_diffusion)
 
