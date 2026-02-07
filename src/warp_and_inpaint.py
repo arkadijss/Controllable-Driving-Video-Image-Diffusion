@@ -441,6 +441,28 @@ def main():
             str(inpainted_classical_frame_out_path), src_frame_inpainted_classical
         )
 
+        masked_input_image_out_path = (
+            output_pair_path / f"masked_input_{tgt_frame_id:05d}.png"
+        )
+        masked_input_image = src_frame_inpainted_classical.copy()
+        masked_input_image[diffusion_inpainting_mask == 255] = [0, 0, 255]
+        cv2.imwrite(str(masked_input_image_out_path), masked_input_image)
+
+        if use_depth_for_inpainting:
+            depth_inpaint_out_path = (
+                output_pair_path / f"depth_inpaint_{tgt_frame_id:05d}.png"
+            )
+            cv2.imwrite(str(depth_inpaint_out_path), depth_inpaint_normalized)
+
+        if use_segmentation_for_inpainting:
+            seg_inpaint_out_path = (
+                output_pair_path / f"seg_inpaint_{tgt_frame_id:05d}.png"
+            )
+            cv2.imwrite(
+                str(seg_inpaint_out_path),
+                cv2.cvtColor(seg_inpaint_resized, cv2.COLOR_RGB2BGR),
+            )
+
         mask_image_out_path = (
             output_pair_path / f"diffusion_inpainting_mask_{tgt_frame_id:05d}.png"
         )
