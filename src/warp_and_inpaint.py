@@ -148,6 +148,7 @@ def main():
     mask_closing_kernel_size = 7
     prefill_missing_regions = False
     prefill_kernel_size = 7
+    diffusion_mask_dilation_kernel_size = 9
     use_depth_for_inpainting = True
     use_segmentation_for_inpainting = True
     inpaint_num_inference_steps = 50
@@ -336,6 +337,18 @@ def main():
                 diffusion_inpainting_mask,
                 prefill_kernel_size,
                 cv2.INPAINT_TELEA,
+            )
+
+        if diffusion_mask_dilation_kernel_size > 0:
+            diffusion_mask_dilation_kernel = np.ones(
+                (
+                    diffusion_mask_dilation_kernel_size,
+                    diffusion_mask_dilation_kernel_size,
+                ),
+                np.uint8,
+            )
+            diffusion_inpainting_mask = cv2.dilate(
+                diffusion_inpainting_mask, diffusion_mask_dilation_kernel, iterations=1
             )
 
         input_image = Image.fromarray(src_frame_inpainted_classical)
