@@ -335,7 +335,9 @@ def main():
                 diffusion_inpainting_mask, diffusion_mask_dilation_kernel, iterations=1
             )
 
-        input_image = Image.fromarray(src_frame_inpainted_classical)
+        input_image = Image.fromarray(
+            cv2.cvtColor(src_frame_inpainted_classical, cv2.COLOR_BGR2RGB)
+        )
         mask_image = Image.fromarray(diffusion_inpainting_mask)
 
         inpaint_kwargs = {"num_inference_steps": inpaint_num_inference_steps}
@@ -388,7 +390,9 @@ def main():
             mask_image,
             **inpaint_kwargs,
         )
-        src_frame_inpainted_diffusion = np.array(src_frame_inpainted_diffusion)
+        src_frame_inpainted_diffusion = cv2.cvtColor(
+            np.array(src_frame_inpainted_diffusion), cv2.COLOR_RGB2BGR
+        )
 
         # Prepare depths for interpolation
         interp_ids = np.arange(src_frame_id + 1, tgt_frame_id)
