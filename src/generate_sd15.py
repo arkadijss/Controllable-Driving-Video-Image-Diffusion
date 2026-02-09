@@ -91,7 +91,7 @@ def preprocess_depth_image(depth_image):
     return depth_image
 
 
-def generate_image(pipeline, prompt, negative_prompt, control_image, seed=0, **kwargs):
+def generate_image(pipeline, prompt, negative_prompt, control_image, seed=42, **kwargs):
     generator = torch.Generator(device="cuda").manual_seed(seed)
     image = pipeline(
         prompt,
@@ -105,7 +105,7 @@ def generate_image(pipeline, prompt, negative_prompt, control_image, seed=0, **k
 
 
 def inpaint_image(
-    pipeline, prompt, negative_prompt, init_image, mask_image, seed=0, **kwargs
+    pipeline, prompt, negative_prompt, init_image, mask_image, seed=42, **kwargs
 ):
     generator = torch.Generator(device="cuda").manual_seed(seed)
     image = pipeline(
