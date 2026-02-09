@@ -159,6 +159,7 @@ def main():
     negative_prompt = "Bad quality, worst quality, cartoon style, unrealistic, blurry"
     experiment_name = f"{frame_ids[0]:05d}_to_{frame_ids[-1]:05d}"
     fps = 4
+    seed = 42
 
     output_dir = Path(f"outputs") / "warp_and_inpaint_vkitti_2" / experiment_name
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -249,6 +250,7 @@ def main():
             prompt,
             negative_prompt,
             gen_control_image,
+            seed=seed,
             **gen_kwargs,
         )
         src_frame = cv2.cvtColor(np.array(src_frame_gen), cv2.COLOR_RGB2BGR)
@@ -388,6 +390,7 @@ def main():
             negative_prompt,
             input_image,
             mask_image,
+            seed=seed,
             **inpaint_kwargs,
         )
         src_frame_inpainted_diffusion = cv2.cvtColor(
