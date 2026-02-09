@@ -30,7 +30,7 @@ def init_generation_pipeline(use_segmentation=True):
         torch_dtype=torch.float16,
     )
     pipeline.scheduler = UniPCMultistepScheduler.from_config(pipeline.scheduler.config)
-    pipeline.enable_model_cpu_offload()
+    pipeline.to("cuda")
 
     return pipeline
 
@@ -41,7 +41,7 @@ def init_base_inpainting_pipeline():
         torch_dtype=torch.float16,
         variant="fp16",
     )
-    pipeline.enable_model_cpu_offload()
+    pipeline.to("cuda")
     return pipeline
 
 
@@ -68,7 +68,7 @@ def init_controllable_inpainting_pipeline(use_depth=True, use_segmentation=True)
         torch_dtype=torch.float16,
     )
     pipeline.scheduler = UniPCMultistepScheduler.from_config(pipeline.scheduler.config)
-    pipeline.enable_model_cpu_offload()
+    pipeline.to("cuda")
 
     return pipeline
 
