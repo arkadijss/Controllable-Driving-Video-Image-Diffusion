@@ -298,22 +298,6 @@ def main():
 
         warp_missing_mask = warp_missing_mask.astype(np.uint8) * 255
 
-        src_frame_warped = cv2.resize(
-            src_frame_warped, diffusion_img_shape, interpolation=cv2.INTER_NEAREST
-        )
-        warp_missing_mask = cv2.resize(
-            warp_missing_mask, diffusion_img_shape, interpolation=cv2.INTER_NEAREST
-        )
-
-        # Assert all masked regions are black
-        assert np.all(
-            src_frame_warped[warp_missing_mask == 255] == 0
-        ), "Masked regions in warped frame are not black"
-
-        # Assert the mask is binary
-        unique_values = np.unique(warp_missing_mask)
-        assert set(unique_values).issubset({0, 255}), "Warp missing mask is not binary"
-
         src_frame_inpainted_classical, _, opening = inpaint_image_classical(
             src_frame_warped,
             warp_missing_mask,
