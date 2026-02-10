@@ -49,10 +49,15 @@ def get_resized_and_cropped_image(
     return image_cropped
 
 
-def get_normalized_depth_image(depth_image, max_gen_depth):
-    norm_depth_image = depth_image / max_gen_depth
-    norm_depth_image = (1 - norm_depth_image) * 255
-    norm_depth_image = norm_depth_image.astype(np.uint8)
+def get_normalized_depth_image(depth_metric):
+    disparity = 1.0 / depth_metric
+
+    d_min = disparity.min()
+    d_max = disparity.max()
+    norm_disparity = (disparity - d_min) / (d_max - d_min)
+
+    norm_depth_image = (norm_disparity * 255).astype(np.uint8)
+
     return norm_depth_image
 
 
@@ -136,7 +141,8 @@ def main():
     frame_ids = [7, 12]
     depth_thr = 0.3
     generate_first_frame = True
-    max_gen_depth = 80.0
+    min_gen_depth = 0.1
+    max_gen_depth = 655.35
     gen_num_inference_steps = 50
     gen_depth_cond_scale = 1.0
     use_segmentation_for_generation = True
@@ -196,7 +202,7 @@ def main():
     )
 
     if generate_first_frame:
-        depth_clipped = np.clip(depth_src, 0, max_gen_depth)
+        depth_clipped = np.clip(depth_src, min_gen_depth, max_gen_depth)
         depth_resized = get_resized_and_cropped_image(
             depth_clipped,
             s,
@@ -204,7 +210,7 @@ def main():
             diffusion_img_shape,
             interpolation=cv2.INTER_NEAREST,
         )
-        norm_depth_image = get_normalized_depth_image(depth_resized, max_gen_depth)
+        norm_depth_image = get_normalized_depth_image(depth_resized)
         norm_depth_out_path = output_dir / f"norm_depth_{src_frame_id:05d}.png"
         cv2.imwrite(str(norm_depth_out_path), norm_depth_image)
 
@@ -347,7 +353,7 @@ def main():
         inpaint_cond_scale = []
         if use_depth_for_inpainting:
             depth_inpaint = get_depth(depth_dir, tgt_frame_id)
-            depth_inpaint_clipped = np.clip(depth_inpaint, 0, max_gen_depth)
+            depth_inpaint_clipped = np.clip(depth_inpaint, min_gen_depth, max_gen_depth)
             depth_inpaint_resized = get_resized_and_cropped_image(
                 depth_inpaint_clipped,
                 s,
@@ -355,9 +361,7 @@ def main():
                 diffusion_img_shape,
                 interpolation=cv2.INTER_NEAREST,
             )
-            depth_inpaint_normalized = get_normalized_depth_image(
-                depth_inpaint_resized, max_gen_depth
-            )
+            depth_inpaint_normalized = get_normalized_depth_image(depth_inpaint_resized)
             depth_inpaint_image = generate_sd15.preprocess_depth_image(
                 depth_inpaint_normalized
             )
