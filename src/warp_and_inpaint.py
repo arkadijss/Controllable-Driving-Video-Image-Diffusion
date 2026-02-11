@@ -155,13 +155,13 @@ def get_preprocessed_control_maps(
         / f"Camera_{args.cam_id}"
     )
 
-    depths_raw = []
-    depth_maps = []
+    depths_raw = {}
+    depth_maps = {}
     use_segmentation = (
         args.use_segmentation_for_generation or args.use_segmentation_for_inpainting
     )
-    seg_maps = [] if use_segmentation else None
-    for frame_id in range(args.frame_ids[0], args.frame_ids[-1] + 1):
+    seg_maps = {} if use_segmentation else None
+    for frame_id in range(min(args.frame_ids), max(args.frame_ids) + 1):
         # Get depth for warping
         depth_raw = get_depth(depth_dir, frame_id)
         depth_raw_resized = get_resized_and_cropped_image(
@@ -181,8 +181,8 @@ def get_preprocessed_control_maps(
             interpolation=cv2.INTER_NEAREST,
         )
         norm_depth_image = get_normalized_depth_image(depth_resized)
-        depths_raw.append(depth_raw_resized)
-        depth_maps.append(norm_depth_image)
+        depths_raw[frame_id] = depth_raw_resized
+        depth_maps[frame_id] = norm_depth_image
 
         if not use_segmentation:
             continue
@@ -198,7 +198,7 @@ def get_preprocessed_control_maps(
         seg_map_ade20k = vkitti_2_to_ade20k.map_vkitti2_to_ade20k(
             seg_map_resized,
         )
-        seg_maps.append(seg_map_ade20k)
+        seg_maps[frame_id] = seg_map_ade20k
 
     return depths_raw, depth_maps, seg_maps
 
@@ -260,12 +260,10 @@ def warp_and_inpaint_sequence(
     diffusion_img_shape = (args.diffusion_img_width, args.diffusion_img_height)
 
     src_frame_id = frame_ids[0]
-
-    depth_src = depths_raw[0]
-
+    depth_src = depths_raw[src_frame_id]
     output_frames = [src_frame]
     for tgt_frame_id in frame_ids[1:]:
-        depth_tgt = depths_raw[tgt_frame_id - frame_ids[0]]
+        depth_tgt = depths_raw[tgt_frame_id]
 
         src_frame_warped, warp_missing_mask = warping_utils.warp_frame(
             src_frame,
@@ -325,7 +323,7 @@ def warp_and_inpaint_sequence(
         inpaint_control_image = []
         inpaint_cond_scale = []
         if args.use_depth_for_inpainting:
-            depth_inpaint_normalized = depth_maps[tgt_frame_id - frame_ids[0]]
+            depth_inpaint_normalized = depth_maps[tgt_frame_id]
             depth_inpaint_image = generate_sd15.preprocess_depth_image(
                 depth_inpaint_normalized
             )
@@ -333,7 +331,7 @@ def warp_and_inpaint_sequence(
             inpaint_cond_scale.append(args.inpaint_depth_cond_scale)
 
         if args.use_segmentation_for_inpainting:
-            seg_inpaint_resized = seg_maps[tgt_frame_id - frame_ids[0]]
+            seg_inpaint_resized = seg_maps[tgt_frame_id]
             seg_inpaint_image = Image.fromarray(seg_inpaint_resized)
             inpaint_control_image.append(seg_inpaint_image)
             inpaint_cond_scale.append(args.inpaint_segmentation_cond_scale)
@@ -359,10 +357,11 @@ def warp_and_inpaint_sequence(
         )
 
         # Prepare depths for interpolation
-        interp_ids = np.arange(src_frame_id + 1, tgt_frame_id)
+        step = 1 if tgt_frame_id > src_frame_id else -1
+        interp_ids = np.arange(src_frame_id + step, tgt_frame_id, step)
         interp_depths = []
         for frame_id in interp_ids:
-            depth_interp = depths_raw[frame_id - frame_ids[0]]
+            depth_interp = depths_raw[frame_id]
             interp_depths.append(depth_interp)
 
         interpolated_frames = interpolate_frames(
@@ -557,23 +556,23 @@ def main(args):
         src_frame = generate_first_frame(
             args,
             gen_pipeline,
-            depth_maps[0],
-            seg_maps[0] if args.use_segmentation_for_generation else None,
+            depth_maps[src_frame_id],
+            seg_maps[src_frame_id] if args.use_segmentation_for_generation else None,
         )
         norm_depth_out_path = output_dir / f"norm_depth_{src_frame_id:05d}.png"
-        cv2.imwrite(str(norm_depth_out_path), depth_maps[0])
-
+        cv2.imwrite(str(norm_depth_out_path), depth_maps[src_frame_id])
         if args.use_segmentation_for_generation:
             seg_src_out_path = output_dir / f"seg_{src_frame_id:05d}.png"
             cv2.imwrite(
-                str(seg_src_out_path), cv2.cvtColor(seg_maps[0], cv2.COLOR_RGB2BGR)
+                str(seg_src_out_path),
+                cv2.cvtColor(seg_maps[src_frame_id], cv2.COLOR_RGB2BGR),
             )
     else:
         rgb_dir = (
             vkitti_2_path
             / f"vkitti_2.0.3_rgb/Scene{args.location:02d}/{args.variation}/frames/rgb/Camera_{args.cam_id}"
         )
-        src_frame_path = rgb_dir / f"rgb_{args.frame_ids[0]:05d}.jpg"
+        src_frame_path = rgb_dir / f"rgb_{src_frame_id:05d}.jpg"
         src_frame = cv2.imread(str(src_frame_path))
         src_frame = get_resized_and_cropped_image(
             src_frame,
