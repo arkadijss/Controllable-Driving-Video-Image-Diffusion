@@ -7,6 +7,7 @@ import yaml
 from PIL import Image
 
 import generate_sd15
+import vkitti_2_to_ade20k
 from warping import warp_frames_vkitti_2, warping_utils
 
 
@@ -135,103 +136,10 @@ def interpolate_frames(
     return interpolated_frames
 
 
-def parse_args():
-    parser = argparse.ArgumentParser()
-    # General
-    parser.add_argument("--vkitti_2_path", type=str, default="~/data/VKITTI-2/")
-    parser.add_argument("--location", type=int, default=1)
-    parser.add_argument("--variation", type=str, default="clone")
-    parser.add_argument("--cam_id", type=int, default=0)
-    parser.add_argument("--frame_ids", type=int, nargs="+", default=[7, 12])
-    parser.add_argument("--orig_width", type=int, default=1242)
-    parser.add_argument("--orig_height", type=int, default=375)
-    parser.add_argument("--diffusion_img_width", type=int, default=512)
-    parser.add_argument("--diffusion_img_height", type=int, default=512)
-    parser.add_argument("--min_gen_depth", type=float, default=0.1)
-    parser.add_argument("--max_gen_depth", type=float, default=655.35)
-    parser.add_argument(
-        "--prompt",
-        type=str,
-        default="A driving scene in a town, photorealistic, clear daylight, blue sky, highly detailed",
-    )
-    parser.add_argument(
-        "--negative_prompt",
-        type=str,
-        default="Bad quality, worst quality, cartoon style, unrealistic, blurry",
-    )
-    parser.add_argument(
-        "--output_root_dir", type=str, default="outputs/warp_and_inpaint_vkitti_2"
-    )
-    parser.add_argument("--experiment_name", type=str, default=None)
-    parser.add_argument("--fps", type=int, default=4)
-    parser.add_argument("--seed", type=int, default=42)
-
-    # First frame generation
-    parser.add_argument("--generate_first_frame", action="store_true")
-    parser.add_argument("--gen_num_inference_steps", type=int, default=50)
-    parser.add_argument("--gen_depth_cond_scale", type=float, default=1.0)
-    parser.add_argument("--use_segmentation_for_generation", action="store_true")
-    parser.add_argument("--gen_segmentation_cond_scale", type=float, default=1.0)
-
-    # Warping
-    parser.add_argument("--depth_thr", type=float, default=0.3)
-
-    # Classical inpainting
-    parser.add_argument("--opening_kernel_size", type=int, default=3)
-    parser.add_argument("--classical_inpaint_kernel_size", type=int, default=3)
-
-    # Diffusion inpainting
-    parser.add_argument("--mask_closing_kernel_size", type=int, default=7)
-    parser.add_argument("--prefill_missing_regions", action="store_true")
-    parser.add_argument("--prefill_kernel_size", type=int, default=7)
-    parser.add_argument("--diffusion_mask_dilation_kernel_size", type=int, default=9)
-    parser.add_argument("--use_depth_for_inpainting", action="store_true")
-    parser.add_argument("--use_segmentation_for_inpainting", action="store_true")
-    parser.add_argument("--inpaint_num_inference_steps", type=int, default=50)
-    parser.add_argument("--inpaint_depth_cond_scale", type=float, default=0.5)
-    parser.add_argument("--inpaint_segmentation_cond_scale", type=float, default=0.5)
-
-    # Interpolation
-    parser.add_argument("--interp_inpaint_kernel_size", type=int, default=3)
-
-    args = parser.parse_args()
-    if args.experiment_name is None:
-        args.experiment_name = f"{args.frame_ids[0]:05d}_to_{args.frame_ids[-1]:05d}"
-    return args
-
-
-def main(args):
-    vkitti_2_path = Path(args.vkitti_2_path).expanduser()
-    output_root_dir = Path(args.output_root_dir).expanduser()
-
-    output_dir = output_root_dir / args.experiment_name
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    args_out_path = output_dir / "args.yaml"
-    with open(args_out_path, "w") as f:
-        yaml.dump(vars(args), f)
-
-    orig_shape = (args.orig_width, args.orig_height)
-    diffusion_img_shape = (args.diffusion_img_width, args.diffusion_img_height)
-
-    cam = warp_frames_vkitti_2.CameraPerspective(
-        vkitti_2_path, args.location, args.variation, args.cam_id
-    )
-    # Update intrinsic matrix K for warping in diffusion image coordinates
-    cam, s, offset_x = update_K(cam, orig_shape, diffusion_img_shape)
-
-    rel_var_dir = Path(f"Scene{args.location:02d}") / args.variation
-    rel_frames_dir = rel_var_dir / "frames"
-    rgb_dir = (
-        vkitti_2_path
-        / "vkitti_2.0.3_rgb"
-        / rel_frames_dir
-        / "rgb"
-        / f"Camera_{args.cam_id}"
-    )
-
-    src_frame_id = args.frame_ids[0]
-
+def get_preprocessed_control_maps(
+    args, vkitti_2_path, s, offset_x, diffusion_img_shape
+):
+    rel_frames_dir = Path(f"Scene{args.location:02d}") / args.variation / "frames"
     depth_dir = (
         vkitti_2_path
         / "vkitti_2.0.3_depth"
@@ -239,18 +147,32 @@ def main(args):
         / "depth"
         / f"Camera_{args.cam_id}"
     )
-    depth_src = get_depth(depth_dir, src_frame_id)
-
     seg_dir = (
         vkitti_2_path
-        / "vkitti_2.0.3_classSegmentation_ADE20K"
+        / "vkitti_2.0.3_classSegmentation"
         / rel_frames_dir
-        / "classSegmentation_ADE20K"
+        / "classSegmentation"
         / f"Camera_{args.cam_id}"
     )
 
-    if args.generate_first_frame:
-        depth_clipped = np.clip(depth_src, args.min_gen_depth, args.max_gen_depth)
+    depths_raw = []
+    depth_maps = []
+    use_segmentation = (
+        args.use_segmentation_for_generation or args.use_segmentation_for_inpainting
+    )
+    seg_maps = [] if use_segmentation else None
+    for frame_id in range(args.frame_ids[0], args.frame_ids[-1] + 1):
+        # Get depth for warping
+        depth_raw = get_depth(depth_dir, frame_id)
+        depth_raw_resized = get_resized_and_cropped_image(
+            depth_raw,
+            s,
+            offset_x,
+            diffusion_img_shape,
+            interpolation=cv2.INTER_NEAREST,
+        )
+        # Get depth maps for ControlNet
+        depth_clipped = np.clip(depth_raw, args.min_gen_depth, args.max_gen_depth)
         depth_resized = get_resized_and_cropped_image(
             depth_clipped,
             s,
@@ -259,100 +181,91 @@ def main(args):
             interpolation=cv2.INTER_NEAREST,
         )
         norm_depth_image = get_normalized_depth_image(depth_resized)
-        norm_depth_out_path = output_dir / f"norm_depth_{src_frame_id:05d}.png"
-        cv2.imwrite(str(norm_depth_out_path), norm_depth_image)
+        depths_raw.append(depth_raw_resized)
+        depth_maps.append(norm_depth_image)
 
-        if args.use_segmentation_for_generation:
-            seg_src = get_segmentation_map(seg_dir, src_frame_id)
-            seg_src_resized = get_resized_and_cropped_image(
-                seg_src,
-                s,
-                offset_x,
-                diffusion_img_shape,
-                interpolation=cv2.INTER_NEAREST,
-            )
-            seg_image = Image.fromarray(seg_src_resized)
-            seg_src_out_path = output_dir / f"seg_{src_frame_id:05d}.png"
-            cv2.imwrite(
-                str(seg_src_out_path), cv2.cvtColor(seg_src_resized, cv2.COLOR_RGB2BGR)
-            )
+        if not use_segmentation:
+            continue
 
-        gen_pipeline = generate_sd15.init_generation_pipeline(
-            use_segmentation=args.use_segmentation_for_generation
-        )
-
-        depth_image = generate_sd15.preprocess_depth_image(norm_depth_image)
-
-        gen_kwargs = {
-            "num_inference_steps": args.gen_num_inference_steps,
-        }
-        gen_control_image = [depth_image]
-        gen_cond_scale = [args.gen_depth_cond_scale]
-
-        if args.use_segmentation_for_generation:
-            gen_control_image.append(seg_image)
-            gen_cond_scale.append(args.gen_segmentation_cond_scale)
-
-        if len(gen_control_image) == 1:
-            gen_control_image = gen_control_image[0]
-            gen_cond_scale = gen_cond_scale[0]
-
-        gen_kwargs["controlnet_conditioning_scale"] = gen_cond_scale
-
-        src_frame_gen = generate_sd15.generate_image(
-            gen_pipeline,
-            args.prompt,
-            args.negative_prompt,
-            gen_control_image,
-            seed=args.seed,
-            **gen_kwargs,
-        )
-        src_frame = cv2.cvtColor(np.array(src_frame_gen), cv2.COLOR_RGB2BGR)
-    else:
-        src_frame_path = rgb_dir / f"rgb_{src_frame_id:05d}.jpg"
-        src_frame = cv2.imread(str(src_frame_path))
-        src_frame = get_resized_and_cropped_image(
-            src_frame,
+        seg_map = get_segmentation_map(seg_dir, frame_id)
+        seg_map_resized = get_resized_and_cropped_image(
+            seg_map,
             s,
             offset_x,
             diffusion_img_shape,
             interpolation=cv2.INTER_NEAREST,
         )
-
-    src_frame_out_path = output_dir / f"{src_frame_id:05d}.png"
-    cv2.imwrite(str(src_frame_out_path), src_frame)
-
-    # Save output video
-    output_video_path = output_dir / f"{args.experiment_name}.mp4"
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    video_writer = cv2.VideoWriter(
-        str(output_video_path),
-        fourcc,
-        args.fps,
-        diffusion_img_shape,
-    )
-    video_writer.write(src_frame)
-
-    depth_src = get_resized_and_cropped_image(
-        depth_src,
-        s,
-        offset_x,
-        diffusion_img_shape,
-        interpolation=cv2.INTER_NEAREST,
-    )
-    inpaint_pipeline = generate_sd15.init_inpainting_pipeline(
-        args.use_depth_for_inpainting, args.use_segmentation_for_inpainting
-    )
-
-    for tgt_frame_id in args.frame_ids[1:]:
-        depth_tgt = get_depth(depth_dir, tgt_frame_id)
-        depth_tgt = get_resized_and_cropped_image(
-            depth_tgt,
-            s,
-            offset_x,
-            diffusion_img_shape,
-            interpolation=cv2.INTER_NEAREST,
+        seg_map_ade20k = vkitti_2_to_ade20k.map_vkitti2_to_ade20k(
+            seg_map_resized,
         )
+        seg_maps.append(seg_map_ade20k)
+
+    return depths_raw, depth_maps, seg_maps
+
+
+def generate_first_frame(args, gen_pipeline, norm_depth_image, seg_src_resized=None):
+    if args.use_segmentation_for_generation:
+        assert (
+            seg_src_resized is not None
+        ), "Segmentation map must be provided if using segmentation for generation"
+        seg_image = Image.fromarray(seg_src_resized)
+
+    depth_image = generate_sd15.preprocess_depth_image(norm_depth_image)
+
+    gen_kwargs = {
+        "num_inference_steps": args.gen_num_inference_steps,
+    }
+    gen_control_image = [depth_image]
+    gen_cond_scale = [args.gen_depth_cond_scale]
+
+    if args.use_segmentation_for_generation:
+        gen_control_image.append(seg_image)
+        gen_cond_scale.append(args.gen_segmentation_cond_scale)
+
+    if len(gen_control_image) == 1:
+        gen_control_image = gen_control_image[0]
+        gen_cond_scale = gen_cond_scale[0]
+
+    gen_kwargs["controlnet_conditioning_scale"] = gen_cond_scale
+
+    src_frame_gen = generate_sd15.generate_image(
+        gen_pipeline,
+        args.prompt,
+        args.negative_prompt,
+        gen_control_image,
+        seed=args.seed,
+        **gen_kwargs,
+    )
+    src_frame = cv2.cvtColor(np.array(src_frame_gen), cv2.COLOR_RGB2BGR)
+
+    return src_frame
+
+
+def warp_and_inpaint_sequence(
+    args,
+    cam,
+    src_frame,
+    frame_ids,
+    inpaint_pipeline,
+    depths_raw,
+    depth_maps,
+    seg_maps=None,
+    debug_dir=None,
+):
+    if args.use_segmentation_for_inpainting:
+        assert (
+            seg_maps is not None
+        ), "Segmentation maps must be provided if using segmentation for inpainting"
+
+    diffusion_img_shape = (args.diffusion_img_width, args.diffusion_img_height)
+
+    src_frame_id = frame_ids[0]
+
+    depth_src = depths_raw[0]
+
+    output_frames = [src_frame]
+    for tgt_frame_id in frame_ids[1:]:
+        depth_tgt = depths_raw[tgt_frame_id - frame_ids[0]]
 
         src_frame_warped, warp_missing_mask = warping_utils.warp_frame(
             src_frame,
@@ -412,18 +325,7 @@ def main(args):
         inpaint_control_image = []
         inpaint_cond_scale = []
         if args.use_depth_for_inpainting:
-            depth_inpaint = get_depth(depth_dir, tgt_frame_id)
-            depth_inpaint_clipped = np.clip(
-                depth_inpaint, args.min_gen_depth, args.max_gen_depth
-            )
-            depth_inpaint_resized = get_resized_and_cropped_image(
-                depth_inpaint_clipped,
-                s,
-                offset_x,
-                diffusion_img_shape,
-                interpolation=cv2.INTER_NEAREST,
-            )
-            depth_inpaint_normalized = get_normalized_depth_image(depth_inpaint_resized)
+            depth_inpaint_normalized = depth_maps[tgt_frame_id - frame_ids[0]]
             depth_inpaint_image = generate_sd15.preprocess_depth_image(
                 depth_inpaint_normalized
             )
@@ -431,14 +333,7 @@ def main(args):
             inpaint_cond_scale.append(args.inpaint_depth_cond_scale)
 
         if args.use_segmentation_for_inpainting:
-            seg_inpaint = get_segmentation_map(seg_dir, tgt_frame_id)
-            seg_inpaint_resized = get_resized_and_cropped_image(
-                seg_inpaint,
-                s,
-                offset_x,
-                diffusion_img_shape,
-                interpolation=cv2.INTER_NEAREST,
-            )
+            seg_inpaint_resized = seg_maps[tgt_frame_id - frame_ids[0]]
             seg_inpaint_image = Image.fromarray(seg_inpaint_resized)
             inpaint_control_image.append(seg_inpaint_image)
             inpaint_cond_scale.append(args.inpaint_segmentation_cond_scale)
@@ -467,14 +362,7 @@ def main(args):
         interp_ids = np.arange(src_frame_id + 1, tgt_frame_id)
         interp_depths = []
         for frame_id in interp_ids:
-            depth_interp = get_depth(depth_dir, frame_id)
-            depth_interp = get_resized_and_cropped_image(
-                depth_interp,
-                s,
-                offset_x,
-                diffusion_img_shape,
-                interpolation=cv2.INTER_NEAREST,
-            )
+            depth_interp = depths_raw[frame_id - frame_ids[0]]
             interp_depths.append(depth_interp)
 
         interpolated_frames = interpolate_frames(
@@ -491,73 +379,247 @@ def main(args):
             diffusion_img_shape,
             inpaint_kernel_size=args.interp_inpaint_kernel_size,
         )
+        output_frames.extend(interpolated_frames)
 
-        # Save outputs
-        output_pair_path = output_dir / f"{src_frame_id:05d}_to_{tgt_frame_id:05d}"
-        output_pair_path.mkdir(parents=True, exist_ok=True)
+        # Save debug outputs
+        if debug_dir is not None:
+            output_pair_path = debug_dir / f"{src_frame_id:05d}_to_{tgt_frame_id:05d}"
+            output_pair_path.mkdir(parents=True, exist_ok=True)
 
-        warped_frame_out_path = output_pair_path / f"warped_{tgt_frame_id:05d}.png"
-        cv2.imwrite(str(warped_frame_out_path), src_frame_warped)
+            warped_frame_out_path = output_pair_path / f"warped_{tgt_frame_id:05d}.png"
+            cv2.imwrite(str(warped_frame_out_path), src_frame_warped)
 
-        warp_missing_mask_out_path = (
-            output_pair_path / f"warp_missing_mask_{tgt_frame_id:05d}.png"
-        )
-        cv2.imwrite(str(warp_missing_mask_out_path), warp_missing_mask)
-
-        inpainted_classical_frame_out_path = (
-            output_pair_path / f"inpainted_classical_{tgt_frame_id:05d}.png"
-        )
-        cv2.imwrite(
-            str(inpainted_classical_frame_out_path), src_frame_inpainted_classical
-        )
-
-        masked_input_image_out_path = (
-            output_pair_path / f"masked_input_{tgt_frame_id:05d}.png"
-        )
-        masked_input_image = src_frame_inpainted_classical.copy()
-        masked_input_image[diffusion_inpainting_mask == 255] = [0, 0, 255]
-        cv2.imwrite(str(masked_input_image_out_path), masked_input_image)
-
-        if args.use_depth_for_inpainting:
-            depth_inpaint_out_path = (
-                output_pair_path / f"depth_inpaint_{tgt_frame_id:05d}.png"
+            warp_missing_mask_out_path = (
+                output_pair_path / f"warp_missing_mask_{tgt_frame_id:05d}.png"
             )
-            cv2.imwrite(str(depth_inpaint_out_path), depth_inpaint_normalized)
+            cv2.imwrite(str(warp_missing_mask_out_path), warp_missing_mask)
 
-        if args.use_segmentation_for_inpainting:
-            seg_inpaint_out_path = (
-                output_pair_path / f"seg_inpaint_{tgt_frame_id:05d}.png"
+            inpainted_classical_frame_out_path = (
+                output_pair_path / f"inpainted_classical_{tgt_frame_id:05d}.png"
             )
             cv2.imwrite(
-                str(seg_inpaint_out_path),
-                cv2.cvtColor(seg_inpaint_resized, cv2.COLOR_RGB2BGR),
+                str(inpainted_classical_frame_out_path), src_frame_inpainted_classical
             )
 
-        mask_image_out_path = (
-            output_pair_path / f"diffusion_inpainting_mask_{tgt_frame_id:05d}.png"
-        )
-        cv2.imwrite(str(mask_image_out_path), diffusion_inpainting_mask)
+            masked_input_image_out_path = (
+                output_pair_path / f"masked_input_{tgt_frame_id:05d}.png"
+            )
+            masked_input_image = src_frame_inpainted_classical.copy()
+            masked_input_image[diffusion_inpainting_mask == 255] = [0, 0, 255]
+            cv2.imwrite(str(masked_input_image_out_path), masked_input_image)
 
-        inpainted_diffusion_frame_out_path = (
-            output_pair_path / f"inpainted_diffusion_{tgt_frame_id:05d}.png"
-        )
-        cv2.imwrite(
-            str(inpainted_diffusion_frame_out_path), src_frame_inpainted_diffusion
-        )
+            if args.use_depth_for_inpainting:
+                depth_inpaint_out_path = (
+                    output_pair_path / f"depth_inpaint_{tgt_frame_id:05d}.png"
+                )
+                cv2.imwrite(str(depth_inpaint_out_path), depth_inpaint_normalized)
 
-        interpolated_frame_out_dir = output_pair_path / "interpolated_frames"
-        interpolated_frame_out_dir.mkdir(parents=True, exist_ok=True)
-        for id, interp_frame in zip(interp_ids, interpolated_frames):
-            interp_frame_out_path = interpolated_frame_out_dir / f"interp_{id:05d}.png"
-            cv2.imwrite(str(interp_frame_out_path), interp_frame)
-            video_writer.write(interp_frame)
+            if args.use_segmentation_for_inpainting:
+                seg_inpaint_out_path = (
+                    output_pair_path / f"seg_inpaint_{tgt_frame_id:05d}.png"
+                )
+                cv2.imwrite(
+                    str(seg_inpaint_out_path),
+                    cv2.cvtColor(seg_inpaint_resized, cv2.COLOR_RGB2BGR),
+                )
 
-        video_writer.write(src_frame_inpainted_diffusion)
+            mask_image_out_path = (
+                output_pair_path / f"diffusion_inpainting_mask_{tgt_frame_id:05d}.png"
+            )
+            cv2.imwrite(str(mask_image_out_path), diffusion_inpainting_mask)
+
+            inpainted_diffusion_frame_out_path = (
+                output_pair_path / f"inpainted_diffusion_{tgt_frame_id:05d}.png"
+            )
+            cv2.imwrite(
+                str(inpainted_diffusion_frame_out_path), src_frame_inpainted_diffusion
+            )
+
+            interpolated_frame_out_dir = output_pair_path / "interpolated_frames"
+            interpolated_frame_out_dir.mkdir(exist_ok=True)
+            for id, interp_frame in zip(interp_ids, interpolated_frames):
+                interp_frame_out_path = (
+                    interpolated_frame_out_dir / f"interp_{id:05d}.png"
+                )
+                cv2.imwrite(str(interp_frame_out_path), interp_frame)
+
+        output_frames.append(src_frame_inpainted_diffusion)
 
         src_frame = src_frame_inpainted_diffusion
         src_frame_id = tgt_frame_id
         depth_src = depth_tgt
 
+    return output_frames
+
+
+def get_base_parser():
+    parser = argparse.ArgumentParser(add_help=False)
+    # General
+    parser.add_argument("--vkitti_2_path", type=str, default="~/data/VKITTI-2/")
+    parser.add_argument("--location", type=int, default=1)
+    parser.add_argument("--variation", type=str, default="clone")
+    parser.add_argument("--cam_id", type=int, default=0)
+    parser.add_argument("--orig_width", type=int, default=1242)
+    parser.add_argument("--orig_height", type=int, default=375)
+    parser.add_argument("--diffusion_img_width", type=int, default=512)
+    parser.add_argument("--diffusion_img_height", type=int, default=512)
+    parser.add_argument("--min_gen_depth", type=float, default=0.1)
+    parser.add_argument("--max_gen_depth", type=float, default=655.35)
+    parser.add_argument(
+        "--prompt",
+        type=str,
+        default="A driving scene in a town, photorealistic, clear daylight, blue sky, highly detailed",
+    )
+    parser.add_argument(
+        "--negative_prompt",
+        type=str,
+        default="Bad quality, worst quality, cartoon style, unrealistic, blurry",
+    )
+    parser.add_argument(
+        "--output_root_dir", type=str, default="outputs/warp_and_inpaint_vkitti_2"
+    )
+    parser.add_argument("--experiment_name", type=str, default=None)
+    parser.add_argument("--fps", type=int, default=4)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--debug", action="store_true")
+
+    # First frame generation
+    parser.add_argument("--generate_first_frame", action="store_true")
+    parser.add_argument("--gen_num_inference_steps", type=int, default=50)
+    parser.add_argument("--gen_depth_cond_scale", type=float, default=1.0)
+    parser.add_argument("--use_segmentation_for_generation", action="store_true")
+    parser.add_argument("--gen_segmentation_cond_scale", type=float, default=1.0)
+
+    # Warping
+    parser.add_argument("--depth_thr", type=float, default=0.3)
+
+    # Classical inpainting
+    parser.add_argument("--opening_kernel_size", type=int, default=3)
+    parser.add_argument("--classical_inpaint_kernel_size", type=int, default=3)
+
+    # Diffusion inpainting
+    parser.add_argument("--mask_closing_kernel_size", type=int, default=7)
+    parser.add_argument("--prefill_missing_regions", action="store_true")
+    parser.add_argument("--prefill_kernel_size", type=int, default=7)
+    parser.add_argument("--diffusion_mask_dilation_kernel_size", type=int, default=9)
+    parser.add_argument("--use_depth_for_inpainting", action="store_true")
+    parser.add_argument("--use_segmentation_for_inpainting", action="store_true")
+    parser.add_argument("--inpaint_num_inference_steps", type=int, default=50)
+    parser.add_argument("--inpaint_depth_cond_scale", type=float, default=0.5)
+    parser.add_argument("--inpaint_segmentation_cond_scale", type=float, default=0.5)
+
+    # Interpolation
+    parser.add_argument("--interp_inpaint_kernel_size", type=int, default=3)
+
+    return parser
+
+
+def parse_args():
+    base_parser = get_base_parser()
+    parser = argparse.ArgumentParser(parents=[base_parser])
+    parser.add_argument("--frame_ids", type=int, nargs="+", default=[7, 12])
+    args = parser.parse_args()
+    if args.experiment_name is None:
+        args.experiment_name = f"{args.frame_ids[0]:05d}_to_{args.frame_ids[-1]:05d}"
+    return args
+
+
+def main(args):
+    vkitti_2_path = Path(args.vkitti_2_path).expanduser()
+    cam = warp_frames_vkitti_2.CameraPerspective(
+        vkitti_2_path, args.location, args.variation, args.cam_id
+    )
+    orig_shape = (args.orig_width, args.orig_height)
+    diffusion_img_shape = (args.diffusion_img_width, args.diffusion_img_height)
+    # Update intrinsic matrix K for warping in diffusion image coordinates
+    cam, s, offset_x = update_K(cam, orig_shape, diffusion_img_shape)
+    depths_raw, depth_maps, seg_maps = get_preprocessed_control_maps(
+        args,
+        vkitti_2_path,
+        s,
+        offset_x,
+        diffusion_img_shape,
+    )
+
+    output_root_dir = Path(args.output_root_dir).expanduser()
+
+    output_dir = output_root_dir / args.experiment_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    src_frame_id = args.frame_ids[0]
+
+    src_frame = None
+    gen_pipeline = None
+    if args.generate_first_frame:
+        gen_pipeline = generate_sd15.init_generation_pipeline(
+            use_segmentation=args.use_segmentation_for_generation
+        )
+        src_frame = generate_first_frame(
+            args,
+            gen_pipeline,
+            depth_maps[0],
+            seg_maps[0] if args.use_segmentation_for_generation else None,
+        )
+        norm_depth_out_path = output_dir / f"norm_depth_{src_frame_id:05d}.png"
+        cv2.imwrite(str(norm_depth_out_path), depth_maps[0])
+
+        if args.use_segmentation_for_generation:
+            seg_src_out_path = output_dir / f"seg_{src_frame_id:05d}.png"
+            cv2.imwrite(
+                str(seg_src_out_path), cv2.cvtColor(seg_maps[0], cv2.COLOR_RGB2BGR)
+            )
+    else:
+        rgb_dir = (
+            vkitti_2_path
+            / f"vkitti_2.0.3_rgb/Scene{args.location:02d}/{args.variation}/frames/rgb/Camera_{args.cam_id}"
+        )
+        src_frame_path = rgb_dir / f"rgb_{args.frame_ids[0]:05d}.jpg"
+        src_frame = cv2.imread(str(src_frame_path))
+        src_frame = get_resized_and_cropped_image(
+            src_frame,
+            s,
+            offset_x,
+            diffusion_img_shape,
+            interpolation=cv2.INTER_NEAREST,
+        )
+
+    args_out_path = output_dir / "args.yaml"
+    with open(args_out_path, "w") as f:
+        yaml.dump(vars(args), f)
+
+    src_frame_out_path = output_dir / f"{src_frame_id:05d}.png"
+    cv2.imwrite(str(src_frame_out_path), src_frame)
+
+    inpaint_pipeline = generate_sd15.init_inpainting_pipeline(
+        args.use_depth_for_inpainting, args.use_segmentation_for_inpainting
+    )
+
+    debug_dir = None
+    if args.debug:
+        debug_dir = output_dir
+    output_frames = warp_and_inpaint_sequence(
+        args,
+        cam,
+        src_frame,
+        args.frame_ids,
+        inpaint_pipeline,
+        depths_raw,
+        depth_maps,
+        seg_maps,
+        debug_dir,
+    )
+
+    # Save output video
+    output_video_path = output_dir / f"{args.experiment_name}.mp4"
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    video_writer = cv2.VideoWriter(
+        str(output_video_path),
+        fourcc,
+        args.fps,
+        diffusion_img_shape,
+    )
+    for frame in output_frames:
+        video_writer.write(frame)
     video_writer.release()
 
 
