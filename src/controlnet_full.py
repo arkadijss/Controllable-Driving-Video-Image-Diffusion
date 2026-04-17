@@ -22,17 +22,18 @@ def parse_args():
     parser.add_argument(
         "--prompt",
         type=str,
-        default="A driving scene in a town, photorealistic, clear daylight, blue sky, highly detailed",
+        default="A realistic driving scene, day, clear weather, best quality, highly detailed",
     )
     parser.add_argument(
         "--negative_prompt",
         type=str,
-        default="Bad quality, worst quality, cartoon style, unrealistic, blurry",
+        default="Bad quality, cartoon style, unrealistic, blurry, low resolution",
     )
     parser.add_argument("--gen_num_inference_steps", type=int, default=50)
     parser.add_argument("--gen_depth_cond_scale", type=float, default=1.0)
     parser.add_argument("--use_segmentation_for_generation", action="store_true")
     parser.add_argument("--gen_segmentation_cond_scale", type=float, default=1.0)
+    parser.add_argument("--gen_guidance_scale", type=float, default=7.5)
     parser.add_argument(
         "--output_root_dir", type=str, default="~/data/VKITTI-2_output/ControlNet_v11"
     )

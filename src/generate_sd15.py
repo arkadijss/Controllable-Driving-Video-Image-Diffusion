@@ -10,7 +10,7 @@ from diffusers import (
 from PIL import Image
 
 
-def init_generation_pipeline(use_segmentation=True):
+def init_generation_pipeline(use_segmentation=True, lora_weights_path=None):
     depth_controlnet = ControlNetModel.from_pretrained(
         "lllyasviel/control_v11f1p_sd15_depth", torch_dtype=torch.float16
     )
@@ -29,6 +29,11 @@ def init_generation_pipeline(use_segmentation=True):
         controlnet=controlnet,
         torch_dtype=torch.float16,
     )
+
+    if lora_weights_path is not None:
+        print(f"Loading LoRA weights from {lora_weights_path}.")
+        pipeline.load_lora_weights(lora_weights_path)
+
     pipeline.scheduler = UniPCMultistepScheduler.from_config(pipeline.scheduler.config)
     pipeline.to("cuda")
 
@@ -73,13 +78,19 @@ def init_controllable_inpainting_pipeline(use_depth=True, use_segmentation=True)
     return pipeline
 
 
-def init_inpainting_pipeline(use_depth=True, use_segmentation=True):
+def init_inpainting_pipeline(
+    use_depth=True, use_segmentation=True, lora_weights_path=None
+):
     if use_depth or use_segmentation:
         pipeline = init_controllable_inpainting_pipeline(
             use_depth=use_depth, use_segmentation=use_segmentation
         )
     else:
         pipeline = init_base_inpainting_pipeline()
+
+    if lora_weights_path is not None:
+        print(f"Loading LoRA weights from {lora_weights_path}.")
+        pipeline.load_lora_weights(lora_weights_path)
 
     return pipeline
 

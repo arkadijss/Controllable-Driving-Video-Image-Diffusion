@@ -214,6 +214,7 @@ def generate_first_frame(args, gen_pipeline, norm_depth_image, seg_src_resized=N
 
     gen_kwargs = {
         "num_inference_steps": args.gen_num_inference_steps,
+        "guidance_scale": args.gen_guidance_scale,
     }
     gen_control_image = [depth_image]
     gen_cond_scale = [args.gen_depth_cond_scale]
@@ -319,7 +320,10 @@ def warp_and_inpaint_sequence(
         )
         mask_image = Image.fromarray(diffusion_inpainting_mask)
 
-        inpaint_kwargs = {"num_inference_steps": args.inpaint_num_inference_steps}
+        inpaint_kwargs = {
+            "num_inference_steps": args.inpaint_num_inference_steps,
+            "guidance_scale": args.inpaint_guidance_scale,
+        }
         inpaint_control_image = []
         inpaint_cond_scale = []
         if args.use_depth_for_inpainting:
@@ -467,12 +471,12 @@ def get_base_parser():
     parser.add_argument(
         "--prompt",
         type=str,
-        default="A driving scene in a town, photorealistic, clear daylight, blue sky, highly detailed",
+        default="A driving scene, day, clear weather, best quality, highly detailed",
     )
     parser.add_argument(
         "--negative_prompt",
         type=str,
-        default="Bad quality, worst quality, cartoon style, unrealistic, blurry",
+        default="Bad quality, cartoon style, unrealistic, blurry, low resolution",
     )
     parser.add_argument(
         "--output_root_dir", type=str, default="outputs/warp_and_inpaint_vkitti_2"
@@ -481,6 +485,7 @@ def get_base_parser():
     parser.add_argument("--fps", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--lora_weights_path", type=str, default=None)
 
     # First frame generation
     parser.add_argument("--generate_first_frame", action="store_true")
@@ -488,6 +493,7 @@ def get_base_parser():
     parser.add_argument("--gen_depth_cond_scale", type=float, default=1.0)
     parser.add_argument("--use_segmentation_for_generation", action="store_true")
     parser.add_argument("--gen_segmentation_cond_scale", type=float, default=1.0)
+    parser.add_argument("--gen_guidance_scale", type=float, default=7.5)
 
     # Warping
     parser.add_argument("--depth_thr", type=float, default=0.3)
@@ -506,6 +512,7 @@ def get_base_parser():
     parser.add_argument("--inpaint_num_inference_steps", type=int, default=50)
     parser.add_argument("--inpaint_depth_cond_scale", type=float, default=0.5)
     parser.add_argument("--inpaint_segmentation_cond_scale", type=float, default=0.5)
+    parser.add_argument("--inpaint_guidance_scale", type=float, default=7.5)
 
     # Interpolation
     parser.add_argument("--interp_inpaint_kernel_size", type=int, default=3)
@@ -551,7 +558,8 @@ def main(args):
     gen_pipeline = None
     if args.generate_first_frame:
         gen_pipeline = generate_sd15.init_generation_pipeline(
-            use_segmentation=args.use_segmentation_for_generation
+            use_segmentation=args.use_segmentation_for_generation,
+            lora_weights_path=args.lora_weights_path,
         )
         src_frame = generate_first_frame(
             args,
@@ -590,7 +598,9 @@ def main(args):
     cv2.imwrite(str(src_frame_out_path), src_frame)
 
     inpaint_pipeline = generate_sd15.init_inpainting_pipeline(
-        args.use_depth_for_inpainting, args.use_segmentation_for_inpainting
+        args.use_depth_for_inpainting,
+        args.use_segmentation_for_inpainting,
+        args.lora_weights_path,
     )
 
     debug_dir = None

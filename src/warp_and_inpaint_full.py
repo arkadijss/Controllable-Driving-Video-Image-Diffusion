@@ -112,11 +112,14 @@ def main(args):
         yaml.dump(vbench_config, file)
 
     gen_pipeline = generate_sd15.init_generation_pipeline(
-        use_segmentation=args.use_segmentation_for_generation
+        use_segmentation=args.use_segmentation_for_generation,
+        lora_weights_path=args.lora_weights_path,
     )
 
     inpaint_pipeline = generate_sd15.init_inpainting_pipeline(
-        args.use_depth_for_inpainting, args.use_segmentation_for_inpainting
+        args.use_depth_for_inpainting,
+        args.use_segmentation_for_inpainting,
+        lora_weights_path=args.lora_weights_path,
     )
 
     eval_dataset_df = pd.read_csv(eval_dataset_csv_path)
