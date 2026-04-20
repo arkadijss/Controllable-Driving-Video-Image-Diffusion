@@ -1,0 +1,13 @@
+Controllable Photorealistic Driving Video Generation using Image Diffusion Models
+
+Copyright (c) 2026 Arkādijs Sergejevs
+
+The authors whose code was used in this project and their project licenses:
+- ControlNet Authors - Apache 2.0
+- YaboZhang (ControlVideo) - MIT
+- Ctrl-Adapter Authors - Apache 2.0
+- Depth Anything V2 Authors - Apache 2.0
+- OpenGVLab (InternImage) - MIT
+- Autonomous Vision Group (kitti360Scripts) - MIT
+- VBench Authors - Apache 2.0
+- The HuggingFace Inc. team (LoRA scripts) - Apache 2.0
