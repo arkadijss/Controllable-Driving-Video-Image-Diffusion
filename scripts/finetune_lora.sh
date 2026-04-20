@@ -1,3 +1,8 @@
+# Copyright (c) 2026 Arkādijs Sergejevs
+# Adapted from Hugging Face Diffusers (LoRA Training Documentation)
+# Original Copyright The HuggingFace Inc. team
+# Licensed under the Apache License 2.0.
+
 export WANDB_API_KEY=x
 
 export MODEL_NAME="stable-diffusion-v1-5/stable-diffusion-v1-5"

@@ -1,3 +1,8 @@
+# Copyright (c) 2026 Arkādijs Sergejevs
+# Adapted from Depth Anything V2
+# Original Copyright (c) 2024 Depth Anything V2 Authors
+# Licensed under the Apache License 2.0.
+
 import glob
 import os
 from dataclasses import dataclass

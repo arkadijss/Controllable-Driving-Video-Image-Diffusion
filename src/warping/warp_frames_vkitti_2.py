@@ -1,3 +1,8 @@
+# Copyright (c) 2026 Arkādijs Sergejevs
+# Adapted from kitti360Scripts
+# Original Copyright (c) 2021 Autonomous Vision Group
+# Licensed under the MIT License.
+
 from pathlib import Path
 
 import cv2

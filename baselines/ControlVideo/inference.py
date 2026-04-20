@@ -1,3 +1,8 @@
+# Copyright (c) 2026 Arkādijs Sergejevs
+# Adapted from ControlVideo
+# Original Copyright (c) 2023 YaboZhang
+# Licensed under the MIT License.
+
 import os
 import numpy as np
 import argparse

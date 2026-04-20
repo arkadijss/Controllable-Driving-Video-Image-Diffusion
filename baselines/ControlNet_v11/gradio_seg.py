@@ -1,3 +1,8 @@
+# Copyright (c) 2026 Arkādijs Sergejevs
+# Adapted from ControlNet 1.1
+# Original Copyright (c) 2023 ControlNet Authors
+# Licensed under the Apache License 2.0.
+
 from share import *
 import config
 

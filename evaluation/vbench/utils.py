@@ -1,3 +1,8 @@
+# Copyright (c) 2026 Arkādijs Sergejevs
+# Adapted from VBench
+# Original Copyright (c) 2023 VBench Authors
+# Licensed under the Apache License 2.0.
+
 import os
 import json
 import numpy as np

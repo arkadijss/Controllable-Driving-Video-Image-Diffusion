@@ -1,4 +1,9 @@
-import os 
+# Copyright (c) 2026 Arkādijs Sergejevs
+# Adapted from Ctrl-Adapter
+# Original Copyright (c) 2024 Ctrl-Adapter Authors
+# Licensed under the Apache License 2.0.
+
+import os
 import time
 import json
 import argparse
