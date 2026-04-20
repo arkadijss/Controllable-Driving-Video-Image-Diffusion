@@ -2,7 +2,7 @@ from pathlib import Path
 
 import yaml
 from mmseg.core.evaluation import get_palette
-from preprocessing import gen_segmentation_data
+from preprocessing.kitti360 import gen_segmentation_data
 
 
 def gen_segmentation_maps(root_dir):

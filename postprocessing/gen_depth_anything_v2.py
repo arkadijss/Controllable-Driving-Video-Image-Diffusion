@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import yaml
-from preprocessing import gen_depth_data
+from preprocessing.kitti360 import gen_depth_data
 
 
 def gen_depth_maps(root_dir):
